@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Дневник смен</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:640px;margin:0 auto;padding:16px;color:#1a1a1a}
+.nav{display:flex;gap:8px;align-items:center;margin-bottom:16px}.nav input{flex:1}
+button,input,select{font:inherit;padding:8px;border:1px solid #ccc;border-radius:8px;background:#fff}
+button{cursor:pointer}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:8px}
+.card{background:#f4f4f6;border-radius:10px;padding:12px}.card small{display:block;color:#666}.card b{font-size:1.25em}
+table{width:100%;border-collapse:collapse;margin:16px 0}td,th{padding:6px;border-bottom:1px solid #eee;text-align:left}
+td.r,th.r{text-align:right}form{display:grid;gap:8px}#err{color:#b00020;min-height:1.2em}.empty{color:#888}
+</style></head><body>
+<h1>Дневник смен</h1>
+<div class="nav"><button onclick="shift(-1)">←</button><input type="date" id="day" onchange="day=this.value;load()"><button onclick="shift(1)">→</button></div>
+<div class="grid" id="sum"></div>
+<table><thead><tr><th>Время</th><th>Оплата</th><th class="r">Сумма</th><th class="r">Комиссия</th></tr></thead><tbody id="rows"></tbody></table>
+<h3>Добавить поездку</h3>
+<form onsubmit="add(event)">
+<input type="datetime-local" id="s" required><input type="datetime-local" id="e" required>
+<input type="number" id="a" placeholder="Сумма" min="1" required><input type="number" id="c" placeholder="Комиссия" min="0" value="0" required>
+<select id="p"><option value="card">Карта</option><option value="cash">Наличные</option></select>
+<button>Добавить</button><div id="err"></div></form>
+<script>
+let day=new Date().toLocaleDateString('sv'),pendingId=null;
+const $=id=>document.getElementById(id),money=n=>n.toLocaleString('ru-RU')+' ₸';
+function shift(n){const d=new Date(day+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+n);day=d.toISOString().slice(0,10);load()}
+const card=(l,v)=>`<div class="card"><small>${l}</small><b>${v}</b></div>`;
+async function load(){
+  $('day').value=day;
+  const [t,s]=await Promise.all([fetch('/api/trips?day='+day).then(r=>r.json()),fetch('/api/summary?day='+day).then(r=>r.json())]);
+  $('sum').innerHTML=card('Поездок',s.count)+card('Выручка',money(s.revenue))+card('Комиссия',money(s.commission))+card('На руки',money(s.net))
+    +card('Наличные ('+s.cash.count+')',money(s.cash.revenue))+card('Карта ('+s.card.count+')',money(s.card.revenue));
+  $('rows').innerHTML=t.length?t.map(x=>`<tr><td>${x.start.slice(11,16)}–${x.end.slice(11,16)}</td><td>${x.payment=='cash'?'нал':'карта'}</td><td class="r">${money(x.amount)}</td><td class="r">${money(x.commission)}</td></tr>`).join(''):'<tr><td colspan="4" class="empty">Нет поездок</td></tr>';
+}
+async function add(ev){
+  ev.preventDefault();$('err').textContent='';
+  pendingId=pendingId||crypto.randomUUID();
+  const body={id:pendingId,start:$('s').value+':00+05:00',end:$('e').value+':00+05:00',amount:+$('a').value,commission:+$('c').value,payment:$('p').value};
+  const r=await fetch('/api/trips',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(r.ok){pendingId=null;day=body.start.slice(0,10);ev.target.reset();load()}
+  else{const j=await r.json();$('err').textContent=Array.isArray(j.detail)?j.detail.map(d=>d.msg).join('; '):j.detail}
+}
+load();
+</script></body></html>
